@@ -3,6 +3,7 @@ from email_validator import validate_email
 import phonenumbers
 import os
 from dotenv import load_dotenv, find_dotenv
+from psycopg2 import Error
 
 
 class User:
@@ -33,8 +34,9 @@ def create_tables(cur):
     try:
         conn.commit()
         print('Таблицы успешно созданы.')
-    except Exception:
-        print('Ошибка! Таблицы не созданы!')
+    except (Exception, Error) as error:
+        print("Ошибка при работе с PostgreSQL", error)
+        print('Таблицы не созданы!')
     return
 
 
@@ -56,6 +58,8 @@ def validate_phone(phone):
         if valid_number:
             phone = phonenumbers.format_number(p, phonenumbers.PhoneNumberFormat.INTERNATIONAL)
             return phone
+        else:
+            print(f'Номер {phone} не валиден. Попытайтесь ввести номер заново с помощью команды "3".')
     except Exception:
         print(f'Номер {phone} не существует. Попытайтесь ввести номер заново с помощью команды "3".')
         phone = None
@@ -67,10 +71,12 @@ def add_client(cur, name, surname, email, phones=None):
                 INSERT INTO clients(name, surname, email) 
                      VALUES (%s, %s, %s) 
                   RETURNING client_id;
-    """, (name, surname, email))
+    """, (name.capitalize(), surname.capitalize(), email))
     try:
         print("Готово! Id клиента: ", client_id := cur.fetchone()[0])
-    except Exception:
+        conn.commit()
+    except (Exception, Error) as error:
+        print("Ошибка при работе с PostgreSQL", error)
         print("Ошибка добавления клиента в Базу данных.")
     if phones is not None:
         for phone in phones:
@@ -81,7 +87,9 @@ def add_client(cur, name, surname, email, phones=None):
             """, (client_id, phone))
             try:
                 print(f"Телефон {phone} добавлен для клиента {client_id}, id: {cur.fetchone()[0]}")
-            except Exception:
+                conn.commit()
+            except (Exception, Error) as error:
+                print("Ошибка при работе с PostgreSQL", error)
                 print(f"Ошибка добавления телефона {phone} в Базу данных: нет пользователя с id {client_id}.")
     return
 
@@ -97,6 +105,7 @@ def add_phone(cur, client_id, phone):
                       RETURNING phone_id;
                     """, (client_id, phone))
         print(f"Номер {phone} c id {cur.fetchone()[0]} успешно добавлен для клиента {client_id}")
+        conn.commit()
     except Exception:
         cur.execute("""
                     ROLLBACK TO SAVEPOINT before_add_phone;
@@ -129,18 +138,42 @@ def delete_phone(cur, client_id, phone):
         try:
             conn.commit()
             print("Номер успешно удален.")
-        except Exception:
+        except (Exception, Error) as error:
+            print("Ошибка при работе с PostgreSQL", error)
             print("Ошибка. Номер не удален.")
-    except Exception:
+    except (Exception, Error) as error:
+        print("Ошибка при работе с PostgreSQL", error)
         print("Такой телефон или клиент отсутствуют в базе данных. Проверьте корректность ввода.")
     return
 
 
-# def update_data(cur, client_id, data):
-#     try:
-#         cur.execute("""
-#         UPDATE clients SET
-#         """)
+def update_data(cur, client_id, old_data, new_data):
+    try:
+        cur.execute("""
+        UPDATE clients SET name=%s
+        WHERE client_id=%s;
+        """, (new_data, client_id))
+
+        cur.execute("""
+        UPDATE clients SET surname=%s
+        WHERE client_id=%s;
+        """, (new_data, client_id))
+
+        cur.execute("""
+        UPDATE clients SET email=%s
+        WHERE client_id=%s;
+        """, (new_data, client_id))
+        for phone in old_data.split(', '):
+            cur.execute("""
+            UPDATE phones SET phone=%s
+            WHERE client_id=%s;
+            """, (new_data, client_id))
+
+            print(f"Данные пользователя {client_id} заменены. ")
+            conn.commit()
+
+    except (Exception, Error) as error:
+        print("Ошибка при работе с PostgreSQL", error)
 
 
 def delete_client(cur, client_id):
@@ -155,7 +188,8 @@ def delete_client(cur, client_id):
     try:
         conn.commit()
         print(f"Клиент с id {client_id} удален.")
-    except Exception:
+    except (Exception, Error) as error:
+        print("Ошибка при работе с PostgreSQL", error)
         print(f"Клиент не удален.")
     return
 
@@ -166,22 +200,28 @@ def find_client(cur, data):
     FROM clients c
     LEFT JOIN phones p ON c.client_id = p.client_id
     WHERE name = %s OR surname = %s OR email = %s OR phone = %s;
-    """, (data, data, data, data))
-    for client in (clients := cur.fetchall()):
-        info = [(id := client[0]),
-                client[1],
-                client[2],
-                client[3],
-                ', '.join([client[4] for client in clients if client[0] == id])]
-        print(f"""
-        id: {id}, 
-        name: {info[1]}, 
-        surname: {info[2]}, 
-        email: {info[3]},
-        phone: {info[4]}
-        """)
-        # how to print once with client_id?
-    return info
+    """, (data.capitalize(), data.capitalize(), data, data))
+    try:
+        for client in (clients := cur.fetchall()):
+            info = [(id := client[0]),
+                    client[1],
+                    client[2],
+                    client[3],
+                    client[4]]
+            phones = (', '.join([client[4] for client in clients if client[0] == id and client[4] is not None]))
+            print(f"""
+            id: {id}, 
+            name: {info[1].capitalize()}, 
+            surname: {info[2].capitalize()}, 
+            email: {info[3]},
+            phone: {phones if phones != '' else "Нет номеров для данного клиента."}
+            """)
+            # how to print once with client_id?
+            return info
+    except (Exception, Error) as error:
+        print("Ошибка при работе с PostgreSQL", error)
+        return
+
 
 # print(f"""
 #                 id: {(id := client[0])},
@@ -192,18 +232,26 @@ def find_client(cur, data):
 #                 """)
 
 def delete_tables(cur):
-    cur.execute("""
-    DROP TABLE phones;
-    DROP TABLE clients;
-    """)
-    conn.commit()
-    print('Таблицы удалены.')
+    try:
+        cur.execute("""
+        DROP TABLE phones;
+        DROP TABLE clients;
+        """)
+        conn.commit()
+        print('Таблицы удалены.')
+    except (Exception, Error) as error:
+        print("Ошибка при работе с PostgreSQL", error)
+        # psycopg2.errors.UndefinedTable: ОШИБКА:  таблица "phones" не существует
+        print("Таблицы не были созданы или уже удалены.")
     return
 
 
 def exit_db(conn):
-    conn.close()
-    print('Вы вышли из базы данных. Для работы перезапустите программу. ')
+    try:
+        conn.close()
+        print('Вы вышли из базы данных. Для работы перезапустите программу. ')
+    except (Exception, Error) as error:
+        print("Ошибка при работе с PostgreSQL", error)
 
 
 if __name__ == '__main__':
@@ -249,10 +297,11 @@ if __name__ == '__main__':
                 elif command == '4':
                     client_id = int(input('Введите id клиента: '))
                     data = input('Введите данные, которые хотите изменить: ')
-                    old_data = find_client(cur, client_id, data)
+                    old_data = find_client(cur, data)
                     # get list of client_info in return
+                    new_data = input('Введите новые данные: ')
                     if data in old_data:
-                        update_data(cur, client_id, data)
+                        update_data(cur, client_id, old_data, new_data)
                     else:
                         print("Клиент с такими данными не найден.")
                 elif command == '5':
@@ -264,12 +313,6 @@ if __name__ == '__main__':
                     client_id = int(input('Введите id клиента для удалениия: '))
                     delete_client(cur, client_id)
                 elif command == '7':
-                    # name = input('Введите имя клиента: ')
-                    # surname = input("Введите фамилию: ")
-                    # email = input("Введите email: ")  # is valid + normalize
-                    # email = validate_mail(email)
-                    # phone = input('Введите номер телефона: ')  # is valid + to format
-                    # phone = validate_phone(phone)
                     data = input("Введите данные для поиска: ")
                     if not data.isalpha():
                         try:
@@ -289,5 +332,27 @@ if __name__ == '__main__':
                 else:
                     print('Ошибочная команда, введите команду снова.')
 
-
-
+# Ниже закомментированный код для проверки работы функций:
+#             # создать структуру БД (таблицы).
+#             create_tables(cur)
+#             # добавить нового клиента.
+#             add_client(cur, name='Anna', surname='Mass', email='lotus@mail.ru',
+#                        phones=[validate_phone(phone) for phone in ('+79264839584', '+79485739485')])
+#             add_client(cur, name='Dmitriy', surname='Demidov', email='dim@gmail.com',
+#                        phones=[validate_phone(phone) for phone in ('375940', '+7 (938) 385 39 58')])
+#             # добавить телефон для существующего клиента.
+#             add_phone(cur, client_id=2, phone=validate_phone('+7 958 394 85 93'))
+#             # изменить данные о клиенте.
+#             update_data(cur, 2, )
+#             # удалить телефон для существующего клиента.
+#             delete_phone(cur, client_id=1, phone=validate_phone('+74059384950'))
+#             delete_phone(cur, client_id=2, phone=validate_phone('+7 958 394 85 93'))
+#             # удалить существующего клиента.
+#             delete_client(cur, client_id=2)
+#             # найти клиента по его данным: имени, фамилии, email или телефону.
+#             find_client(cur, 'Mass')
+#             find_client(cur, '+7 (938) 385 39 58')
+#             # завершить работу с базой данных.
+#             exit_db(conn)
+#             # удалить таблицы и очистить базу данных.
+#             delete_tables(cur)
