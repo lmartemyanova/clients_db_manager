@@ -1,8 +1,10 @@
-import psycopg2
-from email_validator import validate_email
-import phonenumbers
 import os
+import re
+import pandas as pd
+import phonenumbers
+import psycopg2
 from dotenv import load_dotenv, find_dotenv
+from email_validator import validate_email
 from psycopg2 import Error
 
 
@@ -13,6 +15,36 @@ class User:
         self.db_name = os.getenv('db_name')
         self.user = os.getenv('user')
         self.password = os.getenv('password')
+
+
+def validate_mail(email):
+    try:
+        email_info = validate_email(email, check_deliverability=False)
+        return email_info.normalized
+    except ValueError as e:
+        print(str(e))
+        print('Вы ввели некорректный адрес эл. почты.')
+        return None
+
+
+def validate_phone(phone):
+    try:
+        p = phonenumbers.parse(phone)
+        valid_number = phonenumbers.is_valid_number(p)
+        if valid_number:
+            phone = phonenumbers.format_number(p, phonenumbers.PhoneNumberFormat.INTERNATIONAL)
+            return phone
+        else:
+            print(f'Номер {phone} не валиден. ')
+            return None
+    except Exception:
+        print(f'Номер {phone} не существует. Попытайтесь ввести номер заново с помощью команды "3".')
+        return None
+
+
+def validate_name(name):
+    pattern = r'^[A-Za-zА-Яа-я]+$'  # Name can contain Latin and Cyrillic letters
+    return bool(re.match(pattern, name))
 
 
 def create_tables(cur):
@@ -38,32 +70,6 @@ def create_tables(cur):
         print("Ошибка при работе с PostgreSQL", error)
         print('Таблицы не созданы!')
     return
-
-
-def validate_mail(email):
-    try:
-        email_info = validate_email(email, check_deliverability=False)
-        return email_info.normalized
-    except ValueError as e:
-        print(str(e))
-        print('Вы ввели некорректный адрес эл. почты, попытайтесь снова.')
-        email = None
-        return email
-
-
-def validate_phone(phone):
-    try:
-        p = phonenumbers.parse(phone)
-        valid_number = phonenumbers.is_valid_number(p)
-        if valid_number:
-            phone = phonenumbers.format_number(p, phonenumbers.PhoneNumberFormat.INTERNATIONAL)
-            return phone
-        else:
-            print(f'Номер {phone} не валиден. Попытайтесь ввести номер заново с помощью команды "3".')
-    except Exception:
-        print(f'Номер {phone} не существует. Попытайтесь ввести номер заново с помощью команды "3".')
-        phone = None
-        return phone
 
 
 def add_client(cur, name, surname, email, phones=None):
@@ -140,37 +146,44 @@ def delete_phone(cur, client_id, phone):
             print("Номер успешно удален.")
         except (Exception, Error) as error:
             print("Ошибка при работе с PostgreSQL", error)
-            print("Ошибка. Номер не удален.")
+            print("Номер не удален.")
     except (Exception, Error) as error:
         print("Ошибка при работе с PostgreSQL", error)
         print("Такой телефон или клиент отсутствуют в базе данных. Проверьте корректность ввода.")
     return
 
 
-def update_data(cur, client_id, old_data, new_data):
+def update_data(cur, client_id, name=None, surname=None, email=None, phones=None):
     try:
-        cur.execute("""
-        UPDATE clients SET name=%s
-        WHERE client_id=%s;
-        """, (new_data, client_id))
-
-        cur.execute("""
-        UPDATE clients SET surname=%s
-        WHERE client_id=%s;
-        """, (new_data, client_id))
-
-        cur.execute("""
-        UPDATE clients SET email=%s
-        WHERE client_id=%s;
-        """, (new_data, client_id))
-        for phone in old_data.split(', '):
+        if name is not None:
             cur.execute("""
-            UPDATE phones SET phone=%s
+            UPDATE clients SET name=%s
             WHERE client_id=%s;
-            """, (new_data, client_id))
-
-            print(f"Данные пользователя {client_id} заменены. ")
-            conn.commit()
+            """, (name, client_id))
+        else:
+            pass
+        if surname is not None:
+            cur.execute("""
+            UPDATE clients SET surname=%s
+            WHERE client_id=%s;
+            """, (surname, client_id))
+        else:
+            pass
+        if email is not None:
+            cur.execute("""
+            UPDATE clients SET email=%s
+            WHERE client_id=%s;
+            """, (email, client_id))
+        else:
+            pass
+        if phones is not None:
+            for phone in phones:
+                cur.execute("""
+                UPDATE phones SET phone=%s
+                WHERE client_id=%s;
+                """, (phone, client_id))
+                print(f"Данные пользователя {client_id} заменены. ")
+                conn.commit()
 
     except (Exception, Error) as error:
         print("Ошибка при работе с PostgreSQL", error)
@@ -196,40 +209,45 @@ def delete_client(cur, client_id):
 
 def find_client(cur, data):
     cur.execute("""
-    SELECT c.client_id, name, surname, email, phone 
+    SELECT c.client_id, name, surname, email, string_agg(phone, ', ') AS phones 
     FROM clients c
     LEFT JOIN phones p ON c.client_id = p.client_id
-    WHERE name = %s OR surname = %s OR email = %s OR phone = %s;
+    WHERE name = %s OR surname = %s OR email = %s OR phone = %s
+    GROUP BY c.client_id;
     """, (data.capitalize(), data.capitalize(), data, data))
+    try:
+        result = []
+        for client in cur.fetchall():
+            client = [client[0], client[1], client[2], client[3], client[4]]
+            result.append(client)
+        df = pd.DataFrame(result, columns=['id', 'name', 'surname', 'email', 'phones'])
+        df = df.sort_values(by=['id'])
+        print(df.to_string(index=False))
+        return
+    except (Exception, Error) as error:
+        print("Ошибка при работе с PostgreSQL", error)
+        return
+
+
+def find_client_by_id(cur, client_id):
+    cur.execute("""
+        SELECT c.client_id, name, surname, email, phone 
+        FROM clients c
+        LEFT JOIN phones p ON c.client_id = p.client_id
+        WHERE c.client_id = %s;
+        """, (client_id,))
     try:
         for client in (clients := cur.fetchall()):
             info = [(id := client[0]),
                     client[1],
                     client[2],
                     client[3],
-                    client[4]]
-            phones = (', '.join([client[4] for client in clients if client[0] == id and client[4] is not None]))
-            print(f"""
-            id: {id}, 
-            name: {info[1].capitalize()}, 
-            surname: {info[2].capitalize()}, 
-            email: {info[3]},
-            phone: {phones if phones != '' else "Нет номеров для данного клиента."}
-            """)
-            # how to print once with client_id?
+                    [client[4] for client in clients if client[0] == id and client[4] is not None]]
             return info
     except (Exception, Error) as error:
         print("Ошибка при работе с PostgreSQL", error)
         return
 
-
-# print(f"""
-#                 id: {(id := client[0])},
-#                 name: {client[1]},
-#                 surname: {client[2]},
-#                 email: {client[3]},
-#                 phone: {', '.join([client[4] for client in clients if client[0] == id])}
-#                 """)
 
 def delete_tables(cur):
     try:
@@ -276,38 +294,56 @@ if __name__ == '__main__':
                     create_tables(cur)
                 elif command == '2':
                     name = input("Введите имя: ")
+                    while not validate_name(name):
+                        print("Некорректное имя. Попробуйте еще раз.")
+                        name = input("Введите имя: ")
                     surname = input("Введите фамилию: ")
-                    email = input("Введите email: ")
-                    email = validate_mail(email)
+                    while not validate_name(surname):
+                        print("Некорректная фамилия. Попробуйте еще раз.")
+                        surname = input("Введите фамилию: ")
+                    email = validate_mail(input("Введите email: "))
                     while email is None:
-                        email = input("Введите email: ")
-                        email = validate_mail(email)
+                        email = validate_mail(input("Введите email: "))
                     print("Введите ниже через запятую номера телефонов клиента")
                     numbers = input("Введите номер(-а) телефона c +7...: ").replace(' ', '').split(',')
                     phones = [phone for number in numbers if (phone := validate_phone(number)) is not None]
                     add_client(cur, name, surname, email, phones)
                 elif command == '3':
                     client_id = int(input('Введите id клиента: '))
-                    new_phone = input('Введите номер телефона: ')
-                    new_phone = validate_phone(new_phone)
+                    new_phone = validate_phone(input('Введите номер телефона: '))
                     if new_phone is not None:
                         add_phone(cur, client_id, new_phone)
                     else:
                         print("Номер не валиден и не будет добавлен в базу данных.")
                 elif command == '4':
                     client_id = int(input('Введите id клиента: '))
-                    data = input('Введите данные, которые хотите изменить: ')
-                    old_data = find_client(cur, data)
-                    # get list of client_info in return
-                    new_data = input('Введите новые данные: ')
-                    if data in old_data:
-                        update_data(cur, client_id, old_data, new_data)
+                    old_data = find_client_by_id(cur, client_id)
+                    if old_data is not None:
+                        df = pd.DataFrame.from_dict({'id': [old_data[0]],
+                                                     'name': [old_data[1]],
+                                                     'surname': [old_data[2]],
+                                                     'email': [old_data[3]],
+                                                     'phones': [', '.join(old_data[4])]}, )
+                        df = df[['id', 'name', 'surname', 'email', 'phones']]
+                        df = df.sort_values(by=['id'])
+                        print(df.to_string(index=False))
                     else:
-                        print("Клиент с такими данными не найден.")
+                        print("Клиент с таким id не найден. ")
+                    print("Поочередно введите данные, которые хотите изменить. Если данные менять не нужно, "
+                          "нажмите Enter.")
+                    name = input("Введите новое имя: ")
+                    surname = input("Введите новую фамилию: ")
+                    email = validate_mail(input("Введите новый email: "))
+                    numbers = input("Введите номер(-а) телефона c +7...: ").replace(' ', '').split(',')
+                    phones = [phone for number in numbers if (phone := validate_phone(number)) is not None]
+                    name = name if name else None
+                    surname = surname if surname else None
+                    email = email if email else None
+                    phones = phones if phones else None
+                    update_data(cur, client_id, name, surname, email, phones)
                 elif command == '5':
                     client_id = int(input('Введите id клиента: '))
-                    phone = input('Введите номер телефона для удаления: ')
-                    phone = validate_phone(phone)
+                    phone = validate_phone(input('Введите номер телефона для удаления: '))
                     delete_phone(cur, client_id, phone)
                 elif command == '6':
                     client_id = int(input('Введите id клиента для удалениия: '))
