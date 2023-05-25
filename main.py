@@ -81,22 +81,28 @@ def add_client(cur, name, surname, email, phones=None):
     try:
         print("Готово! Id клиента: ", client_id := cur.fetchone()[0])
         conn.commit()
+    except psycopg2.errors.UniqueViolation:
+        print(f"Клиент с email {email} уже есть в базе данных. ")
+        return
     except (Exception, Error) as error:
-        print("Ошибка при работе с PostgreSQL", error)
-        print("Ошибка добавления клиента в Базу данных.")
+        print("Ошибка добавления клиента в Базу данных: ошибка при работе с PostgreSQL", error)
+        return
     if phones is not None:
         for phone in phones:
-            cur.execute("""
-            INSERT INTO phones(client_id, phone)
-                 VALUES (%s, %s)
-              RETURNING phone_id;
-            """, (client_id, phone))
             try:
+                cur.execute("""
+                INSERT INTO phones(client_id, phone)
+                     VALUES (%s, %s)
+                  RETURNING phone_id;
+                """, (client_id, phone))
                 print(f"Телефон {phone} добавлен для клиента {client_id}, id: {cur.fetchone()[0]}")
                 conn.commit()
-            except (Exception, Error) as error:
-                print("Ошибка при работе с PostgreSQL", error)
+            except psycopg2.errors.ForeignKeyViolation:
                 print(f"Ошибка добавления телефона {phone} в Базу данных: нет пользователя с id {client_id}.")
+                return
+            except (Exception, Error) as error:
+                print("Ошибка добавления телефона: ошибка при работе с PostgreSQL", error)
+                return
     return
 
 
@@ -112,7 +118,10 @@ def add_phone(cur, client_id, phone):
                     """, (client_id, phone))
         print(f"Номер {phone} c id {cur.fetchone()[0]} успешно добавлен для клиента {client_id}")
         conn.commit()
-    except Exception:
+    except psycopg2.errors.ForeignKeyViolation:
+        print("Клиента с таким id нет в базе данных. ")
+        return
+    except psycopg2.errors.UniqueViolation:
         cur.execute("""
                     ROLLBACK TO SAVEPOINT before_add_phone;
         """)
@@ -123,19 +132,31 @@ def add_phone(cur, client_id, phone):
                       FROM phones
                      WHERE phone = %s;
                     """, (phone,))
-        print(f"Номер с id {(id := (cur.fetchall())[0])[0]} уже зарегистрирован для клиента id {id[1]}.")
+        print(f"Номер {phone} уже зарегистрирован для клиента id {cur.fetchall()[0][1]}.")
+        return
+    except (Exception, Error) as error:
+        print("Ошибка при работе с PostgreSQL", error)
+        return
     return
 
 
 def delete_phone(cur, client_id, phone):
-    cur.execute("""
-                SELECT phone_id 
-                  FROM phones
-                 WHERE client_id = %s AND
-                       phone = %s;
-                """, (client_id, phone))
     try:
-        print(f"Вы хотите удалить телефон c id {(phone_id := cur.fetchone()[0])}.")
+        cur.execute("""
+                    SELECT phone_id 
+                      FROM phones
+                     WHERE client_id = %s AND
+                           phone = %s;
+                    """, (client_id, phone))
+        phone_id = cur.fetchone()
+        if phone_id is None:
+            print(f"Не зарегистрирован номер {phone} для клиента {client_id}. Проверьте корректность ввода. ")
+            return
+        phone_id = phone_id[0]
+        print(f"Вы хотите удалить телефон c id {phone_id}.")
+        cur.execute("""
+                    SAVEPOINT delete_phone_savepoint;
+                    """)
         cur.execute("""
                     DELETE FROM phones
                      WHERE client_id = %s AND
@@ -144,12 +165,18 @@ def delete_phone(cur, client_id, phone):
         try:
             conn.commit()
             print("Номер успешно удален.")
+        except psycopg2.errors.TransactionRollbackError:
+            cur.execute("""
+                        ROLLBACK TO SAVEPOINT delete_phone_savepoint;
+                        """)
+            print("Ошибка транзакции. Номер не удален. ")
         except (Exception, Error) as error:
-            print("Ошибка при работе с PostgreSQL", error)
-            print("Номер не удален.")
+            cur.execute("""
+                        ROLLBACK TO SAVEPOINT delete_phone_savepoint;
+                        """)
+            print("Номер не удален. Ошибка при работе с PostgreSQL", error)
     except (Exception, Error) as error:
         print("Ошибка при работе с PostgreSQL", error)
-        print("Такой телефон или клиент отсутствуют в базе данных. Проверьте корректность ввода.")
     return
 
 
