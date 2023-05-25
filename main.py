@@ -179,11 +179,16 @@ def update_data(cur, client_id, name=None, surname=None, email=None, phones=None
         if phones is not None:
             for phone in phones:
                 cur.execute("""
-                UPDATE phones SET phone=%s
+                DELETE FROM phones 
                 WHERE client_id=%s;
-                """, (phone, client_id))
-                print(f"Данные пользователя {client_id} заменены. ")
-                conn.commit()
+                """, (client_id,))
+                phones_values = [(client_id, phone) for phone in phones]
+                cur.executemany("""
+                INSERT INTO phones (client_id, phone) 
+                VALUES (%s, %s);
+                """, phones_values)
+        print(f"Данные пользователя {client_id} заменены. ")
+        conn.commit()
 
     except (Exception, Error) as error:
         print("Ошибка при работе с PostgreSQL", error)
