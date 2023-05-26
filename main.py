@@ -94,20 +94,21 @@ def add_client(cur, name, surname, email, phones=None):
         return
     if phones is not None:
         for phone in phones:
-            try:
-                cur.execute("""
-                INSERT INTO phones(client_id, phone)
-                     VALUES (%s, %s)
-                  RETURNING phone_id;
-                """, (client_id, phone))
-                print(f"Телефон {phone} добавлен для клиента {client_id}, id: {cur.fetchone()[0]}")
-                conn.commit()
-            except psycopg2.errors.ForeignKeyViolation:
-                print(f"Ошибка добавления телефона {phone} в Базу данных: нет пользователя с id {client_id}.")
-                return
-            except (Exception, Error) as error:
-                print("Ошибка добавления телефона: ошибка при работе с PostgreSQL", error)
-                return
+            if phone is not None:
+                try:
+                    cur.execute("""
+                    INSERT INTO phones(client_id, phone)
+                         VALUES (%s, %s)
+                      RETURNING phone_id;
+                    """, (client_id, phone))
+                    print(f"Телефон {phone} добавлен для клиента {client_id[0]}, id: {cur.fetchone()[0]}")
+                    conn.commit()
+                except psycopg2.errors.ForeignKeyViolation:
+                    print(f"Ошибка добавления телефона {phone} в Базу данных: нет пользователя с id {client_id}.")
+                    return
+                except (Exception, Error) as error:
+                    print("Ошибка добавления телефона: ошибка при работе с PostgreSQL", error)
+                    return
     return
 
 
@@ -166,7 +167,7 @@ def delete_phone(cur, client_id, phone):
                     DELETE FROM phones
                      WHERE client_id = %s AND
                            phone = %s;
-                    """, (client_id, phone_id))
+                    """, (client_id, phone))
         try:
             conn.commit()
             print("Номер успешно удален.")
@@ -279,7 +280,19 @@ def find_client_by_id(cur, client_id):
                     client[2],
                     client[3],
                     [client[4] for client in clients if client[0] == id and client[4] is not None]]
-            return info
+            if info:
+                df = pd.DataFrame.from_dict({'id': [info[0]],
+                                             'name': [info[1]],
+                                             'surname': [info[2]],
+                                             'email': [info[3]],
+                                             'phones': [', '.join(info[4])]}, )
+                df = df[['id', 'name', 'surname', 'email', 'phones']]
+                df = df.sort_values(by=['id'])
+                print(df.to_string(index=False))
+                return info
+            else:
+                print("Клиент с таким id не найден. ")
+                return
     except (Exception, Error) as error:
         print("Ошибка при работе с PostgreSQL", error)
         return
@@ -306,10 +319,47 @@ def exit_db(conn):
         print('Вы вышли из базы данных. Для работы перезапустите программу. ')
     except (Exception, Error) as error:
         print("Ошибка при работе с PostgreSQL", error)
+        return
+
+
+def test_functions(cur):
+    create_tables(cur)
+    add_client(cur,
+               name="Alina",
+               surname="Petrova",
+               email="alinaaaa@mail.ru",
+               phones=[validate_phone(phone) for phone in ["+79562948573", "+79485736", "+7-926-485-93-04"]
+                       if phone is not None])
+    add_client(cur,
+               name="Anna",
+               surname="Mass",
+               email="lotus4@gmail.com",
+               phones=[validate_phone(phone) for phone in ["+79840293847", "94857392"]
+                       if phone is not None])
+    add_phone(cur,
+              client_id=2,
+              phone=validate_phone("+7(948)273-64-82"))
+    delete_phone(cur,
+                 client_id=1,
+                 phone=validate_phone("+79562948573"))
+    update_data(cur,
+                client_id=1,
+                surname="Ivanova",
+                phones=[validate_phone(phone) for phone in ["+7-958-394-85-72", "+79872049384"]])
+    find_client(cur, data="Anna")
+    find_client_by_id(cur, client_id=1)
+    delete_client(cur, client_id=1)
+    delete_tables(cur)
+    return
 
 
 if __name__ == '__main__':
     user = User()
+
+    with psycopg2.connect(database=user.db_name, user=user.user, password=user.password) as conn:
+        with conn.cursor() as cur:
+            test_functions(cur)
+
     with psycopg2.connect(database=user.db_name, user=user.user, password=user.password) as conn:
         with conn.cursor() as cur:
             print("""
@@ -354,18 +404,8 @@ if __name__ == '__main__':
                         print("Номер не валиден и не будет добавлен в базу данных.")
                 elif command == '4':
                     client_id = int(input('Введите id клиента: '))
+                    print("Текущие данные клиента: ")
                     old_data = find_client_by_id(cur, client_id)
-                    if old_data is not None:
-                        df = pd.DataFrame.from_dict({'id': [old_data[0]],
-                                                     'name': [old_data[1]],
-                                                     'surname': [old_data[2]],
-                                                     'email': [old_data[3]],
-                                                     'phones': [', '.join(old_data[4])]}, )
-                        df = df[['id', 'name', 'surname', 'email', 'phones']]
-                        df = df.sort_values(by=['id'])
-                        print(df.to_string(index=False))
-                    else:
-                        print("Клиент с таким id не найден. ")
                     print("Поочередно введите данные, которые хотите изменить. Если данные менять не нужно, "
                           "нажмите Enter.")
                     name = input("Введите новое имя: ")
@@ -400,46 +440,10 @@ if __name__ == '__main__':
                     find_client(cur, data)
                 elif command == '8':
                     client_id = int(input('Введите id клиента: '))
-                    old_data = find_client_by_id(cur, client_id)
-                    if old_data is not None:
-                        df = pd.DataFrame.from_dict({'id': [old_data[0]],
-                                                     'name': [old_data[1]],
-                                                     'surname': [old_data[2]],
-                                                     'email': [old_data[3]],
-                                                     'phones': [', '.join(old_data[4])]}, )
-                        df = df[['id', 'name', 'surname', 'email', 'phones']]
-                        df = df.sort_values(by=['id'])
-                        print(df.to_string(index=False))
-                    else:
-                        print("Клиент с таким id не найден. ")
+                    data = find_client_by_id(cur, client_id)
                 elif command == '9':
                     exit_db(conn)
                 elif command == '10':
                     delete_tables(cur)
                 else:
                     print('Ошибочная команда, введите команду снова.')
-
-# Ниже закомментированный код для проверки работы функций:
-#             # создать структуру БД (таблицы).
-#             create_tables(cur)
-#             # добавить нового клиента.
-#             add_client(cur, name='Anna', surname='Mass', email='lotus@mail.ru',
-#                        phones=[validate_phone(phone) for phone in ('+79264839584', '+79485739485')])
-#             add_client(cur, name='Dmitriy', surname='Demidov', email='dim@gmail.com',
-#                        phones=[validate_phone(phone) for phone in ('375940', '+7 (938) 385 39 58')])
-#             # добавить телефон для существующего клиента.
-#             add_phone(cur, client_id=2, phone=validate_phone('+7 958 394 85 93'))
-#             # изменить данные о клиенте.
-#             update_data(cur, 2, )
-#             # удалить телефон для существующего клиента.
-#             delete_phone(cur, client_id=1, phone=validate_phone('+74059384950'))
-#             delete_phone(cur, client_id=2, phone=validate_phone('+7 958 394 85 93'))
-#             # удалить существующего клиента.
-#             delete_client(cur, client_id=2)
-#             # найти клиента по его данным: имени, фамилии, email или телефону.
-#             find_client(cur, 'Mass')
-#             find_client(cur, '+7 (938) 385 39 58')
-#             # завершить работу с базой данных.
-#             exit_db(conn)
-#             # удалить таблицы и очистить базу данных.
-#             delete_tables(cur)
