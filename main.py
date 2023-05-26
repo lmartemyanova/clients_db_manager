@@ -73,17 +73,22 @@ def create_tables(cur):
 
 
 def add_client(cur, name, surname, email, phones=None):
-    cur.execute("""
-                INSERT INTO clients(name, surname, email) 
-                     VALUES (%s, %s, %s) 
-                  RETURNING client_id;
-    """, (name.capitalize(), surname.capitalize(), email))
     try:
-        print("Готово! Id клиента: ", client_id := cur.fetchone()[0])
+        cur.execute("""
+                            SELECT client_id
+                            FROM clients
+                            WHERE email = %s;
+                            """, (email,))
+        if (existing_mail := cur.fetchone()) is not None:
+            print(f"Клиент с email {email} уже есть в базе данных. Id клиента: {existing_mail[0]}. ")
+            return
+        cur.execute("""
+                    INSERT INTO clients(name, surname, email) 
+                         VALUES (%s, %s, %s) 
+                      RETURNING client_id;
+        """, (name.capitalize(), surname.capitalize(), email))
+        print("Готово! Id клиента: ", (client_id := cur.fetchone())[0])
         conn.commit()
-    except psycopg2.errors.UniqueViolation:
-        print(f"Клиент с email {email} уже есть в базе данных. ")
-        return
     except (Exception, Error) as error:
         print("Ошибка добавления клиента в Базу данных: ошибка при работе с PostgreSQL", error)
         return
@@ -204,16 +209,15 @@ def update_data(cur, client_id, name=None, surname=None, email=None, phones=None
         else:
             pass
         if phones is not None:
-            for phone in phones:
-                cur.execute("""
-                DELETE FROM phones 
-                WHERE client_id=%s;
-                """, (client_id,))
-                phones_values = [(client_id, phone) for phone in phones]
-                cur.executemany("""
-                INSERT INTO phones (client_id, phone) 
-                VALUES (%s, %s);
-                """, phones_values)
+            cur.execute("""
+            DELETE FROM phones 
+            WHERE client_id=%s;
+            """, (client_id,))
+            phones_values = [(client_id, phone) for phone in phones]
+            cur.executemany("""
+            INSERT INTO phones (client_id, phone) 
+            VALUES (%s, %s);
+            """, phones_values)
         print(f"Данные пользователя {client_id} заменены. ")
         conn.commit()
 
@@ -317,8 +321,9 @@ if __name__ == '__main__':
                     5. удалить телефон для существующего клиента.
                     6. удалить существующего клиента.
                     7. найти клиента по его данным: имени, фамилии, email или телефону.
-                    8. завершить работу с базой данных.
-                    9. удалить таблицы и очистить базу данных.
+                    8. найти клиента по его id.
+                    9. завершить работу с базой данных.
+                    10. удалить таблицы и очистить базу данных.
                     """)
             while True:
                 command = input("Введите номер команды: ")
@@ -394,8 +399,22 @@ if __name__ == '__main__':
                             pass
                     find_client(cur, data)
                 elif command == '8':
-                    exit_db(conn)
+                    client_id = int(input('Введите id клиента: '))
+                    old_data = find_client_by_id(cur, client_id)
+                    if old_data is not None:
+                        df = pd.DataFrame.from_dict({'id': [old_data[0]],
+                                                     'name': [old_data[1]],
+                                                     'surname': [old_data[2]],
+                                                     'email': [old_data[3]],
+                                                     'phones': [', '.join(old_data[4])]}, )
+                        df = df[['id', 'name', 'surname', 'email', 'phones']]
+                        df = df.sort_values(by=['id'])
+                        print(df.to_string(index=False))
+                    else:
+                        print("Клиент с таким id не найден. ")
                 elif command == '9':
+                    exit_db(conn)
+                elif command == '10':
                     delete_tables(cur)
                 else:
                     print('Ошибочная команда, введите команду снова.')
