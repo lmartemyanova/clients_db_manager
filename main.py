@@ -221,9 +221,10 @@ def update_data(cur, client_id, name=None, surname=None, email=None, phones=None
             """, phones_values)
         print(f"Данные пользователя {client_id} заменены. ")
         conn.commit()
-
+        return
     except (Exception, Error) as error:
         print("Ошибка при работе с PostgreSQL", error)
+        return
 
 
 def delete_client(cur, client_id):
@@ -241,6 +242,7 @@ def delete_client(cur, client_id):
     except (Exception, Error) as error:
         print("Ошибка при работе с PostgreSQL", error)
         print(f"Клиент не удален.")
+        return
     return
 
 
@@ -260,10 +262,10 @@ def find_client(cur, data):
         df = pd.DataFrame(result, columns=['id', 'name', 'surname', 'email', 'phones'])
         df = df.sort_values(by=['id'])
         print(df.to_string(index=False))
-        return
     except (Exception, Error) as error:
         print("Ошибка при работе с PostgreSQL", error)
         return
+    return
 
 
 def find_client_by_id(cur, client_id):
@@ -274,25 +276,25 @@ def find_client_by_id(cur, client_id):
         WHERE c.client_id = %s;
         """, (client_id,))
     try:
-        for client in (clients := cur.fetchall()):
+        client = cur.fetchone()
+        if client is None:
+            print("Клиент с таким id не найден. ")
+            return
+        else:
             info = [(id := client[0]),
                     client[1],
                     client[2],
                     client[3],
                     [client[4] for client in clients if client[0] == id and client[4] is not None]]
-            if info:
-                df = pd.DataFrame.from_dict({'id': [info[0]],
-                                             'name': [info[1]],
-                                             'surname': [info[2]],
-                                             'email': [info[3]],
-                                             'phones': [', '.join(info[4])]}, )
-                df = df[['id', 'name', 'surname', 'email', 'phones']]
-                df = df.sort_values(by=['id'])
-                print(df.to_string(index=False))
-                return info
-            else:
-                print("Клиент с таким id не найден. ")
-                return
+            df = pd.DataFrame.from_dict({'id': [info[0]],
+                                         'name': [info[1]],
+                                         'surname': [info[2]],
+                                         'email': [info[3]],
+                                         'phones': [', '.join(info[4])]}, )
+            df = df[['id', 'name', 'surname', 'email', 'phones']]
+            df = df.sort_values(by=['id'])
+            print(df.to_string(index=False))
+            return info
     except (Exception, Error) as error:
         print("Ошибка при работе с PostgreSQL", error)
         return
@@ -306,10 +308,12 @@ def delete_tables(cur):
         """)
         conn.commit()
         print('Таблицы удалены.')
+    except psycopg2.errors.UndefinedTable:
+        print("Таблицы не были созданы или уже удалены.")
+        return
     except (Exception, Error) as error:
         print("Ошибка при работе с PostgreSQL", error)
-        # psycopg2.errors.UndefinedTable: ОШИБКА:  таблица "phones" не существует
-        print("Таблицы не были созданы или уже удалены.")
+        return
     return
 
 
