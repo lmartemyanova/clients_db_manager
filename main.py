@@ -335,21 +335,26 @@ def find_client(cur, data):
     :return: None.
     """
 
-    cur.execute("""
-    SELECT c.client_id, name, surname, email, string_agg(phone, ', ') AS phones 
-    FROM clients c
-    LEFT JOIN phones p ON c.client_id = p.client_id
-    WHERE name = %s OR surname = %s OR email = %s OR phone = %s
-    GROUP BY c.client_id;
-    """, (data.capitalize(), data.capitalize(), data, data))
     try:
-        result = []
-        for client in cur.fetchall():
-            client = [client[0], client[1], client[2], client[3], client[4]]
-            result.append(client)
-        df = pd.DataFrame(result, columns=['id', 'name', 'surname', 'email', 'phones'])
-        df = df.sort_values(by=['id'])
-        print(df.to_string(index=False))
+        cur.execute("""
+        SELECT c.client_id, name, surname, email, string_agg(phone, ', ') AS phones 
+        FROM clients c
+        LEFT JOIN phones p ON c.client_id = p.client_id
+        WHERE name = %s OR surname = %s OR email = %s OR phone = %s
+        GROUP BY c.client_id;
+        """, (data.capitalize(), data.capitalize(), data, data))
+        clients = cur.fetchall()
+        if not clients:
+            print("Таких клиентов нет в базе данных.")
+            return
+        else:
+            result = []
+            for client in clients:
+                client = [client[0], client[1], client[2], client[3], client[4]]
+                result.append(client)
+            df = pd.DataFrame(result, columns=['id', 'name', 'surname', 'email', 'phones'])
+            df = df.sort_values(by=['id'])
+            print(df.to_string(index=False))
     except (Exception, Error) as error:
         print("Ошибка при работе с PostgreSQL", error)
         return
