@@ -18,6 +18,14 @@ class User:
 
 
 def validate_mail(email):
+
+    """
+    Validates an email address to ensure it is in a valid format.
+    :param email: The email address to validate (string).
+    :return: If the email address is valid, returns the normalized version of the email address.
+    Else prints an error message and returns None.
+    """
+
     try:
         email_info = validate_email(email, check_deliverability=False)
         return email_info.normalized
@@ -28,6 +36,14 @@ def validate_mail(email):
 
 
 def validate_phone(phone):
+
+    """
+    Validates a phone number to ensure it is in a valid format.
+    :param phone: The phone number to validate (string).
+    :return: If the phone number is valid, returns the formatted international version of the phone number.
+    Else prints an error message and returns None.
+    """
+
     try:
         p = phonenumbers.parse(phone)
         valid_number = phonenumbers.is_valid_number(p)
@@ -43,11 +59,25 @@ def validate_phone(phone):
 
 
 def validate_name(name):
+
+    """
+     Validates a name to ensure it only contains Latin and Cyrillic letters.
+    :param name: The name to validate (string).
+    :return: True if the name is valid, False otherwise.
+    """
+
     pattern = r'^[A-Za-zА-Яа-я]+$'  # Name can contain Latin and Cyrillic letters
     return bool(re.match(pattern, name))
 
 
 def create_tables(cur):
+
+    """
+    Creates two tables in a PostgreSQL database if they do not already exist.
+    :param cur: A cursor object used to execute SQL commands.
+    :return: None.
+    """
+
     cur.execute("""
                     CREATE TABLE IF NOT EXISTS clients(
                     client_id SERIAL PRIMARY KEY,
@@ -73,6 +103,17 @@ def create_tables(cur):
 
 
 def add_client(cur, name, surname, email, phones=None):
+
+    """
+    Adds a new client to the clients table in a PostgreSQL database, along with any associated phone numbers.
+    :param cur: A cursor object used to execute SQL commands.
+    :param name: The client's first name (string).
+    :param surname: The client's last name (string).
+    :param email: The client's email address (string).
+    :param phones: The client's phone numbers (list of strings, optional, default None).
+    :return: None.
+    """
+
     try:
         cur.execute("""
                             SELECT client_id
@@ -113,6 +154,15 @@ def add_client(cur, name, surname, email, phones=None):
 
 
 def add_phone(cur, client_id, phone):
+
+    """
+    Adds a new phone number to the phones table in a PostgreSQL database for a given client.
+    :param cur: A cursor object used to execute SQL commands.
+    :param client_id: The ID of the client to add the phone number to table (integer).
+    :param phone: The phone number to add (string).
+    :return: None.
+    """
+
     cur.execute("""
                 SAVEPOINT before_add_phone;
     """)
@@ -147,6 +197,15 @@ def add_phone(cur, client_id, phone):
 
 
 def delete_phone(cur, client_id, phone):
+
+    """
+    Deletes a phone number from the phones table in a PostgreSQL database for a given client.
+    :param cur: A cursor object used to execute SQL commands.
+    :param client_id: ID of the client to delete the phone number from table of phones (integer).
+    :param phone: The phone number to delete (string).
+    :return: None.
+    """
+
     try:
         cur.execute("""
                     SELECT phone_id 
@@ -187,6 +246,18 @@ def delete_phone(cur, client_id, phone):
 
 
 def update_data(cur, client_id, name=None, surname=None, email=None, phones=None):
+
+    """
+    Updates the data for a given client in a PostgreSQL database.
+    :param cur: A cursor object used to execute SQL commands.
+    :param client_id: The ID of the client to update (integer).
+    :param name: The new name for the client (string, optional, default None).
+    :param surname: The new surname for the client (string, optional, default None).
+    :param email: The new email for the client (string, optional, default None).
+    :param phones: The new phone numbers for the client (list of strings, optional, default None).
+    :return: None.
+    """
+
     try:
         if name is not None:
             cur.execute("""
@@ -228,6 +299,14 @@ def update_data(cur, client_id, name=None, surname=None, email=None, phones=None
 
 
 def delete_client(cur, client_id):
+
+    """
+    Deletes a client and all associated phone numbers from a PostgreSQL database.
+    :param cur: A cursor object used to execute SQL commands.
+    :param client_id: The ID of the client to delete (integer).
+    :return: None.
+    """
+
     cur.execute("""
     DELETE FROM phones 
      WHERE client_id=%s;
@@ -247,6 +326,15 @@ def delete_client(cur, client_id):
 
 
 def find_client(cur, data):
+
+    """
+    Searches for a client in a PostgreSQL database based on their name, surname, email, or phone number.
+    Print data in a table.
+    :param cur: A cursor object used to execute SQL commands.
+    :param data: The data for search query (string).
+    :return: None.
+    """
+
     cur.execute("""
     SELECT c.client_id, name, surname, email, string_agg(phone, ', ') AS phones 
     FROM clients c
@@ -269,6 +357,14 @@ def find_client(cur, data):
 
 
 def find_client_by_id(cur, client_id):
+
+    """
+    Finds a client in the database by their ID.
+    :param cur: A cursor object for the database connection.
+    :param client_id: The ID of the client to find (integer).
+    :return: The list with the client data, or None if no client has found.
+    """
+
     cur.execute("""
         SELECT c.client_id, name, surname, email, phone 
         FROM clients c
@@ -301,6 +397,13 @@ def find_client_by_id(cur, client_id):
 
 
 def delete_tables(cur):
+
+    """
+    Deletes the 'phones' and 'clients' tables from a PostgreSQL database.
+    :param cur: A cursor object used to execute SQL commands.
+    :return: None.
+    """
+
     try:
         cur.execute("""
         DROP TABLE phones;
@@ -318,6 +421,13 @@ def delete_tables(cur):
 
 
 def exit_db(conn):
+
+    """
+    Closes the connection to a PostgreSQL database.
+    :param conn: A connection object representing the connection to the database.
+    :return: None.
+    """
+
     try:
         conn.close()
         print('Вы вышли из базы данных. Для работы перезапустите программу. ')
@@ -327,6 +437,13 @@ def exit_db(conn):
 
 
 def test_functions(cur):
+
+    """
+    Tests the functions in a PostgreSQL database.
+    :param cur: A cursor object used to execute SQL commands.
+    :return: None.
+    """
+
     create_tables(cur)
     add_client(cur,
                name="Alina",
