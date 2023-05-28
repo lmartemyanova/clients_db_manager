@@ -366,7 +366,8 @@ def find_client_by_id(cur, client_id):
     """
 
     cur.execute("""
-        SELECT c.client_id, name, surname, email, phone 
+        SELECT c.client_id, name, surname, email, 
+               (SELECT array_agg(phone) FROM phones WHERE client_id = c.client_id) AS phones 
         FROM clients c
         LEFT JOIN phones p ON c.client_id = p.client_id
         WHERE c.client_id = %s;
@@ -377,11 +378,12 @@ def find_client_by_id(cur, client_id):
             print("Клиент с таким id не найден. ")
             return
         else:
-            info = [(id := client[0]),
+
+            info = [client[0],
                     client[1],
                     client[2],
                     client[3],
-                    [client[4] for client in clients if client[0] == id and client[4] is not None]]
+                    client[4]]
             df = pd.DataFrame.from_dict({'id': [info[0]],
                                          'name': [info[1]],
                                          'surname': [info[2]],
